@@ -90,6 +90,18 @@ local function createControlPanel()
     controlFrame.BorderSizePixel = 0
     controlFrame.Visible = true
     controlFrame.ZIndex = 100
+
+    local authorLabel = Instance.new("TextLabel")
+    authorLabel.Text = "by Didod00"
+    authorLabel.Size = UDim2.new(1, -30, 0, 20)
+    authorLabel.Position = UDim2.new(0, 15, 1, -25)
+    authorLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+    authorLabel.BackgroundTransparency = 1
+    authorLabel.Font = Enum.Font.GothamMedium
+    authorLabel.TextSize = 11
+    authorLabel.TextXAlignment = Enum.TextXAlignment.Right
+    authorLabel.ZIndex = 101
+    authorLabel.Parent = controlFrame
     
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 12)
