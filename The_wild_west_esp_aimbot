@@ -1,0 +1,1333 @@
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+
+-- Local player
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+local camera = Workspace.CurrentCamera
+
+-- Folders
+local PLAYERS_FOLDER = Workspace.WORKSPACE_Entities.Players
+local ANIMALS_FOLDER = Workspace.WORKSPACE_Entities.Animals
+
+-- Aimbot Settings
+local Aimbot = {
+    Enabled = false,
+    Aiming = false,
+    AimKey = Enum.UserInputType.MouseButton2,
+    ActivateKey = Enum.KeyCode.Z,
+    
+    Smoothing = 0.5,
+    
+    BaseHeight = 1.0,
+    HeightPerStud = 0.055,
+    
+    FOV = 180,
+    ShowFOVCircle = true,
+    
+    TeamCheck = false,
+    VisibleCheck = false
+}
+
+-- Animal ESP Settings
+local AnimalESP = {
+    Enabled = true,
+    Animals = {
+        Bear = true,
+        Bison = true,
+        Deer = true,
+        Gator = true
+    },
+    Boxes = {},
+    Labels = {},
+    HeadCubes = {},
+    Connections = {}
+}
+
+-- Player ESP Settings
+local PlayerESP = {
+    Enabled = true,
+    ShowName = true,
+    ShowDistance = true,
+    TeamCheck = true,
+    
+    SquareSize = 60,
+    SquareThickness = 2,
+    SquareColorEnemy = Color3.fromRGB(255, 0, 0),
+    SquareColorAlly = Color3.fromRGB(0, 255, 0),
+    SquareColorNeutral = Color3.fromRGB(255, 255, 0),
+    
+    TextSize = 12,
+    TextBackground = Color3.fromRGB(0, 0, 0),
+    TextBackgroundTransparency = 0.5
+}
+
+-- Storage
+local PlayerStorage = {}
+local SquareGUI
+
+-- Colors for different animals
+local AnimalColors = {
+    Bear = Color3.fromRGB(139, 69, 19),
+    Bison = Color3.fromRGB(105, 105, 105),
+    Deer = Color3.fromRGB(222, 184, 135),
+    Gator = Color3.fromRGB(34, 139, 34)
+}
+
+-- FOV Circle via Drawing API
+local FOVCircle = nil
+
+-- GUI Menu
+local ScreenGui = nil
+local MenuVisible = true
+
+-- Function to get player model
+local function GetPlayerModel(playerName)
+    local entities = workspace:FindFirstChild("WORKSPACE_Entities")
+    if not entities then return nil end
+    
+    local playersFolder = entities:FindFirstChild("Players")
+    if not playersFolder then return nil end
+    
+    local playerModel = playersFolder:FindFirstChild(playerName)
+    if playerModel and playerModel:IsA("Model") then
+        return playerModel
+    end
+    
+    return nil
+end
+
+-- Function to get PrimaryPart of player model
+local function GetPlayerPrimaryPart(playerModel)
+    if playerModel then
+        return playerModel.PrimaryPart or playerModel:FindFirstChild("HumanoidRootPart") or playerModel:FindFirstChildWhichIsA("BasePart")
+    end
+    return nil
+end
+
+-- Function to find animal head
+local function FindAnimalHead(animalModel)
+    local possibleHeadNames = {"Head", "head", "HEAD", "HeadPart", "HeadPart1"}
+    
+    for _, name in ipairs(possibleHeadNames) do
+        local head = animalModel:FindFirstChild(name)
+        if head and head:IsA("BasePart") then
+            return head
+        end
+    end
+    
+    return nil
+end
+
+-- Function to create red cube in head
+local function CreateHeadCube(headPart)
+    if not headPart then return nil end
+    
+    local cube = Instance.new("Part")
+    cube.Name = "ESP_HeadCube"
+    cube.Shape = Enum.PartType.Block
+    cube.Material = Enum.Material.SmoothPlastic
+    cube.Color = Color3.fromRGB(255, 0, 0)
+    cube.Size = Vector3.new(0.3, 0.3, 0.3)
+    cube.Anchored = false
+    cube.CanCollide = false
+    cube.CanQuery = false
+    cube.CastShadow = false
+    cube.Transparency = 0.2
+    
+    local weld = Instance.new("Weld")
+    weld.Part0 = headPart
+    weld.Part1 = cube
+    weld.C0 = CFrame.new()
+    weld.Parent = cube
+    
+    cube.Parent = headPart
+    
+    return cube
+end
+
+-- FOV Circle
+local function CreateFOVCircle()
+    FOVCircle = Drawing.new("Circle")
+    FOVCircle.Visible = Aimbot.ShowFOVCircle
+    FOVCircle.Thickness = 2
+    FOVCircle.Transparency = 1
+    FOVCircle.Color = Color3.fromRGB(255, 50, 50)
+    FOVCircle.Filled = false
+    
+    return FOVCircle
+end
+
+local function UpdateFOVCircle()
+    if FOVCircle then
+        local camera = Workspace.CurrentCamera
+        if camera then
+            local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+            
+            FOVCircle.Visible = Aimbot.ShowFOVCircle
+            FOVCircle.Position = screenCenter
+            FOVCircle.Radius = Aimbot.FOV
+            
+            if Aimbot.Enabled then
+                if Aimbot.Aiming then
+                    FOVCircle.Color = Color3.fromRGB(50, 255, 50)
+                else
+                    FOVCircle.Color = Color3.fromRGB(255, 150, 50)
+                end
+            else
+                FOVCircle.Color = Color3.fromRGB(255, 50, 50)
+            end
+        end
+    end
+end
+
+-- Minimalistic menu (movable)
+local function CreateMovableMenu()
+    if ScreenGui then ScreenGui:Destroy() end
+    
+    ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "AimbotESPMenu"
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    ScreenGui.ResetOnSpawn = false
+    
+    -- Main frame (movable)
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(0, 250, 0, 450)
+    MainFrame.Position = UDim2.new(0.5, -125, 0.5, -210)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    MainFrame.BackgroundTransparency = 0.1
+    MainFrame.BorderSizePixel = 1
+    MainFrame.BorderColor3 = Color3.fromRGB(60, 60, 70)
+    MainFrame.Active = true
+    MainFrame.Selectable = true
+    MainFrame.Draggable = true
+    MainFrame.Parent = ScreenGui
+    
+    -- Title bar (dragging area)
+    local TitleBar = Instance.new("Frame")
+    TitleBar.Name = "TitleBar"
+    TitleBar.Size = UDim2.new(1, 0, 0, 30)
+    TitleBar.Position = UDim2.new(0, 0, 0, 0)
+    TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    TitleBar.BorderSizePixel = 0
+    TitleBar.Parent = MainFrame
+    
+    -- Hide button
+    local HideButton = Instance.new("TextButton")
+    HideButton.Name = "HideButton"
+    HideButton.Size = UDim2.new(0, 25, 0, 25)
+    HideButton.Position = UDim2.new(1, -30, 0.5, -12)
+    HideButton.Text = "━"
+    HideButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    HideButton.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+    HideButton.BorderSizePixel = 0
+    HideButton.Font = Enum.Font.SourceSansBold
+    HideButton.TextSize = 16
+    HideButton.Parent = TitleBar
+    
+    -- Title
+    local Title = Instance.new("TextLabel")
+    Title.Name = "Title"
+    Title.Size = UDim2.new(1, -40, 1, 0)
+    Title.Position = UDim2.new(0, 10, 0, 0)
+    Title.Text = "Star"
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.BackgroundTransparency = 1
+    Title.Font = Enum.Font.SourceSansBold
+    Title.TextSize = 14
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.Parent = TitleBar
+    
+    -- Settings area
+    local ContentFrame = Instance.new("Frame")
+    ContentFrame.Name = "ContentFrame"
+    ContentFrame.Size = UDim2.new(1, -20, 1, -40)
+    ContentFrame.Position = UDim2.new(0, 10, 0, 35)
+    ContentFrame.BackgroundTransparency = 1
+    ContentFrame.Parent = MainFrame
+    
+    local UIListLayout = Instance.new("UIListLayout")
+    UIListLayout.Padding = UDim.new(0, 10)
+    UIListLayout.Parent = ContentFrame
+    
+    -- Aimbot section
+    local AimbotSection = Instance.new("Frame")
+    AimbotSection.Name = "AimbotSection"
+    AimbotSection.Size = UDim2.new(1, 0, 0, 160)
+    AimbotSection.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    AimbotSection.BackgroundTransparency = 0.2
+    AimbotSection.BorderSizePixel = 1
+    AimbotSection.BorderColor3 = Color3.fromRGB(50, 50, 55)
+    AimbotSection.Parent = ContentFrame
+    
+    local AimbotTitle = Instance.new("TextLabel")
+    AimbotTitle.Name = "AimbotTitle"
+    AimbotTitle.Size = UDim2.new(1, 0, 0, 25)
+    AimbotTitle.Position = UDim2.new(0, 0, 0, 0)
+    AimbotTitle.Text = "AIMBOT"
+    AimbotTitle.TextColor3 = Color3.fromRGB(220, 220, 220)
+    AimbotTitle.BackgroundTransparency = 1
+    AimbotTitle.Font = Enum.Font.SourceSansBold
+    AimbotTitle.TextSize = 12
+    AimbotTitle.Parent = AimbotSection
+    
+    -- Aimbot toggle
+    local AimbotToggleFrame = Instance.new("Frame")
+    AimbotToggleFrame.Name = "AimbotToggleFrame"
+    AimbotToggleFrame.Size = UDim2.new(1, -10, 0, 25)
+    AimbotToggleFrame.Position = UDim2.new(0, 5, 0, 30)
+    AimbotToggleFrame.BackgroundTransparency = 1
+    AimbotToggleFrame.Parent = AimbotSection
+    
+    local AimbotToggleLabel = Instance.new("TextLabel")
+    AimbotToggleLabel.Name = "AimbotToggleLabel"
+    AimbotToggleLabel.Size = UDim2.new(0, 120, 1, 0)
+    AimbotToggleLabel.Position = UDim2.new(0, 0, 0, 0)
+    AimbotToggleLabel.Text = "Enable Aimbot"
+    AimbotToggleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    AimbotToggleLabel.BackgroundTransparency = 1
+    AimbotToggleLabel.Font = Enum.Font.SourceSans
+    AimbotToggleLabel.TextSize = 12
+    AimbotToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    AimbotToggleLabel.Parent = AimbotToggleFrame
+    
+    local AimbotToggleButton = Instance.new("TextButton")
+    AimbotToggleButton.Name = "AimbotToggleButton"
+    AimbotToggleButton.Size = UDim2.new(0, 50, 0, 20)
+    AimbotToggleButton.Position = UDim2.new(1, -50, 0.5, -10)
+    AimbotToggleButton.Text = Aimbot.Enabled and "ON" or "OFF"
+    AimbotToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    AimbotToggleButton.BackgroundColor3 = Aimbot.Enabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+    AimbotToggleButton.BorderSizePixel = 1
+    AimbotToggleButton.BorderColor3 = Color3.fromRGB(80, 80, 80)
+    AimbotToggleButton.Font = Enum.Font.SourceSans
+    AimbotToggleButton.TextSize = 11
+    AimbotToggleButton.Parent = AimbotToggleFrame
+    
+    -- FOV Circle
+    local FOVToggleFrame = Instance.new("Frame")
+    FOVToggleFrame.Name = "FOVToggleFrame"
+    FOVToggleFrame.Size = UDim2.new(1, -10, 0, 25)
+    FOVToggleFrame.Position = UDim2.new(0, 5, 0, 60)
+    FOVToggleFrame.BackgroundTransparency = 1
+    FOVToggleFrame.Parent = AimbotSection
+    
+    local FOVToggleLabel = Instance.new("TextLabel")
+    FOVToggleLabel.Name = "FOVToggleLabel"
+    FOVToggleLabel.Size = UDim2.new(0, 120, 1, 0)
+    FOVToggleLabel.Position = UDim2.new(0, 0, 0, 0)
+    FOVToggleLabel.Text = "FOV Circle"
+    FOVToggleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    FOVToggleLabel.BackgroundTransparency = 1
+    FOVToggleLabel.Font = Enum.Font.SourceSans
+    FOVToggleLabel.TextSize = 12
+    FOVToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    FOVToggleLabel.Parent = FOVToggleFrame
+    
+    local FOVToggleButton = Instance.new("TextButton")
+    FOVToggleButton.Name = "FOVToggleButton"
+    FOVToggleButton.Size = UDim2.new(0, 50, 0, 20)
+    FOVToggleButton.Position = UDim2.new(1, -50, 0.5, -10)
+    FOVToggleButton.Text = Aimbot.ShowFOVCircle and "ON" or "OFF"
+    FOVToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    FOVToggleButton.BackgroundColor3 = Aimbot.ShowFOVCircle and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+    FOVToggleButton.BorderSizePixel = 1
+    FOVToggleButton.BorderColor3 = Color3.fromRGB(80, 80, 80)
+    FOVToggleButton.Font = Enum.Font.SourceSans
+    FOVToggleButton.TextSize = 11
+    FOVToggleButton.Parent = FOVToggleFrame
+    
+    -- FOV Size
+    local FOVSizeFrame = Instance.new("Frame")
+    FOVSizeFrame.Name = "FOVSizeFrame"
+    FOVSizeFrame.Size = UDim2.new(1, -10, 0, 25)
+    FOVSizeFrame.Position = UDim2.new(0, 5, 0, 90)
+    FOVSizeFrame.BackgroundTransparency = 1
+    FOVSizeFrame.Parent = AimbotSection
+    
+    local FOVSizeLabel = Instance.new("TextLabel")
+    FOVSizeLabel.Name = "FOVSizeLabel"
+    FOVSizeLabel.Size = UDim2.new(0, 120, 1, 0)
+    FOVSizeLabel.Position = UDim2.new(0, 0, 0, 0)
+    FOVSizeLabel.Text = "FOV Size: " .. Aimbot.FOV
+    FOVSizeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    FOVSizeLabel.BackgroundTransparency = 1
+    FOVSizeLabel.Font = Enum.Font.SourceSans
+    FOVSizeLabel.TextSize = 12
+    FOVSizeLabel.TextXAlignment = Enum.TextXAlignment.Left
+    FOVSizeLabel.Parent = FOVSizeFrame
+    
+    local FOVMinusButton = Instance.new("TextButton")
+    FOVMinusButton.Name = "FOVMinusButton"
+    FOVMinusButton.Size = UDim2.new(0, 25, 0, 20)
+    FOVMinusButton.Position = UDim2.new(1, -80, 0.5, -10)
+    FOVMinusButton.Text = "-"
+    FOVMinusButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    FOVMinusButton.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+    FOVMinusButton.BorderSizePixel = 1
+    FOVMinusButton.BorderColor3 = Color3.fromRGB(80, 80, 80)
+    FOVMinusButton.Font = Enum.Font.SourceSansBold
+    FOVMinusButton.TextSize = 12
+    FOVMinusButton.Parent = FOVSizeFrame
+    
+    local FOVPlusButton = Instance.new("TextButton")
+    FOVPlusButton.Name = "FOVPlusButton"
+    FOVPlusButton.Size = UDim2.new(0, 25, 0, 20)
+    FOVPlusButton.Position = UDim2.new(1, -25, 0.5, -10)
+    FOVPlusButton.Text = "+"
+    FOVPlusButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    FOVPlusButton.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+    FOVPlusButton.BorderSizePixel = 1
+    FOVPlusButton.BorderColor3 = Color3.fromRGB(80, 80, 80)
+    FOVPlusButton.Font = Enum.Font.SourceSansBold
+    FOVPlusButton.TextSize = 12
+    FOVPlusButton.Parent = FOVSizeFrame
+    
+    -- Animal section
+    local AnimalSection = Instance.new("Frame")
+    AnimalSection.Name = "AnimalSection"
+    AnimalSection.Size = UDim2.new(1, 0, 0, 130)
+    AnimalSection.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    AnimalSection.BackgroundTransparency = 0.2
+    AnimalSection.BorderSizePixel = 1
+    AnimalSection.BorderColor3 = Color3.fromRGB(50, 50, 55)
+    AnimalSection.Parent = ContentFrame
+    
+    local AnimalTitle = Instance.new("TextLabel")
+    AnimalTitle.Name = "AnimalTitle"
+    AnimalTitle.Size = UDim2.new(1, 0, 0, 25)
+    AnimalTitle.Position = UDim2.new(0, 0, 0, 0)
+    AnimalTitle.Text = "ANIMAL ESP"
+    AnimalTitle.TextColor3 = Color3.fromRGB(220, 220, 220)
+    AnimalTitle.BackgroundTransparency = 1
+    AnimalTitle.Font = Enum.Font.SourceSansBold
+    AnimalTitle.TextSize = 12
+    AnimalTitle.Parent = AnimalSection
+    
+    -- Animal ESP toggle
+    local AnimalToggleFrame = Instance.new("Frame")
+    AnimalToggleFrame.Name = "AnimalToggleFrame"
+    AnimalToggleFrame.Size = UDim2.new(1, -10, 0, 25)
+    AnimalToggleFrame.Position = UDim2.new(0, 5, 0, 30)
+    AnimalToggleFrame.BackgroundTransparency = 1
+    AnimalToggleFrame.Parent = AnimalSection
+    
+    local AnimalToggleLabel = Instance.new("TextLabel")
+    AnimalToggleLabel.Name = "AnimalToggleLabel"
+    AnimalToggleLabel.Size = UDim2.new(0, 120, 1, 0)
+    AnimalToggleLabel.Position = UDim2.new(0, 0, 0, 0)
+    AnimalToggleLabel.Text = "Animal ESP"
+    AnimalToggleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    AnimalToggleLabel.BackgroundTransparency = 1
+    AnimalToggleLabel.Font = Enum.Font.SourceSans
+    AnimalToggleLabel.TextSize = 12
+    AnimalToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    AnimalToggleLabel.Parent = AnimalToggleFrame
+    
+    local AnimalToggleButton = Instance.new("TextButton")
+    AnimalToggleButton.Name = "AnimalToggleButton"
+    AnimalToggleButton.Size = UDim2.new(0, 50, 0, 20)
+    AnimalToggleButton.Position = UDim2.new(1, -50, 0.5, -10)
+    AnimalToggleButton.Text = AnimalESP.Enabled and "ON" or "OFF"
+    AnimalToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    AnimalToggleButton.BackgroundColor3 = AnimalESP.Enabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+    AnimalToggleButton.BorderSizePixel = 1
+    AnimalToggleButton.BorderColor3 = Color3.fromRGB(80, 80, 80)
+    AnimalToggleButton.Font = Enum.Font.SourceSans
+    AnimalToggleButton.TextSize = 11
+    AnimalToggleButton.Parent = AnimalToggleFrame
+    
+    -- Function to create animal toggle
+    local function CreateAnimalToggle(name, yPos, default)
+        local toggleFrame = Instance.new("Frame")
+        toggleFrame.Name = name .. "Toggle"
+        toggleFrame.Size = UDim2.new(1, -10, 0, 20)
+        toggleFrame.Position = UDim2.new(0, 5, 0, yPos)
+        toggleFrame.BackgroundTransparency = 1
+        toggleFrame.Parent = AnimalSection
+        
+        local label = Instance.new("TextLabel")
+        label.Name = "Label"
+        label.Size = UDim2.new(0, 80, 1, 0)
+        label.Position = UDim2.new(0, 0, 0, 0)
+        label.Text = name
+        label.TextColor3 = Color3.fromRGB(220, 220, 220)
+        label.BackgroundTransparency = 1
+        label.Font = Enum.Font.SourceSans
+        label.TextSize = 11
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.Parent = toggleFrame
+        
+        local button = Instance.new("TextButton")
+        button.Name = "Toggle"
+        button.Size = UDim2.new(0, 40, 0, 16)
+        button.Position = UDim2.new(1, -40, 0.5, -8)
+        button.Text = default and "ON" or "OFF"
+        button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        button.BackgroundColor3 = default and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(150, 0, 0)
+        button.BorderSizePixel = 1
+        button.BorderColor3 = Color3.fromRGB(70, 70, 70)
+        button.Font = Enum.Font.SourceSans
+        button.TextSize = 10
+        button.Parent = toggleFrame
+        
+        return button
+    end
+    
+    -- Create animal toggles
+    local BearToggle = CreateAnimalToggle("Bear", 60, true)
+    local BisonToggle = CreateAnimalToggle("Bison", 82, true)
+    local DeerToggle = CreateAnimalToggle("Deer", 104, true)
+    
+    -- Player section
+    local PlayerSection = Instance.new("Frame")
+    PlayerSection.Name = "PlayerSection"
+    PlayerSection.Size = UDim2.new(1, 0, 0, 90)
+    PlayerSection.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    PlayerSection.BackgroundTransparency = 0.2
+    PlayerSection.BorderSizePixel = 1
+    PlayerSection.BorderColor3 = Color3.fromRGB(50, 50, 55)
+    PlayerSection.Parent = ContentFrame
+    
+    local PlayerTitle = Instance.new("TextLabel")
+    PlayerTitle.Name = "PlayerTitle"
+    PlayerTitle.Size = UDim2.new(1, 0, 0, 25)
+    PlayerTitle.Position = UDim2.new(0, 0, 0, 0)
+    PlayerTitle.Text = "PLAYER ESP"
+    PlayerTitle.TextColor3 = Color3.fromRGB(220, 220, 220)
+    PlayerTitle.BackgroundTransparency = 1
+    PlayerTitle.Font = Enum.Font.SourceSansBold
+    PlayerTitle.TextSize = 12
+    PlayerTitle.Parent = PlayerSection
+    
+    -- Player ESP toggle
+    local PlayerToggleFrame = Instance.new("Frame")
+    PlayerToggleFrame.Name = "PlayerToggleFrame"
+    PlayerToggleFrame.Size = UDim2.new(1, -10, 0, 25)
+    PlayerToggleFrame.Position = UDim2.new(0, 5, 0, 30)
+    PlayerToggleFrame.BackgroundTransparency = 1
+    PlayerToggleFrame.Parent = PlayerSection
+    
+    local PlayerToggleLabel = Instance.new("TextLabel")
+    PlayerToggleLabel.Name = "PlayerToggleLabel"
+    PlayerToggleLabel.Size = UDim2.new(0, 120, 1, 0)
+    PlayerToggleLabel.Position = UDim2.new(0, 0, 0, 0)
+    PlayerToggleLabel.Text = "Player ESP"
+    PlayerToggleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    PlayerToggleLabel.BackgroundTransparency = 1
+    PlayerToggleLabel.Font = Enum.Font.SourceSans
+    PlayerToggleLabel.TextSize = 12
+    PlayerToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    PlayerToggleLabel.Parent = PlayerToggleFrame
+    
+    local PlayerToggleButton = Instance.new("TextButton")
+    PlayerToggleButton.Name = "PlayerToggleButton"
+    PlayerToggleButton.Size = UDim2.new(0, 50, 0, 20)
+    PlayerToggleButton.Position = UDim2.new(1, -50, 0.5, -10)
+    PlayerToggleButton.Text = PlayerESP.Enabled and "ON" or "OFF"
+    PlayerToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    PlayerToggleButton.BackgroundColor3 = PlayerESP.Enabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+    PlayerToggleButton.BorderSizePixel = 1
+    PlayerToggleButton.BorderColor3 = Color3.fromRGB(80, 80, 80)
+    PlayerToggleButton.Font = Enum.Font.SourceSans
+    PlayerToggleButton.TextSize = 11
+    PlayerToggleButton.Parent = PlayerToggleFrame
+    
+    -- Hide/show menu
+    local isHidden = false
+    local hiddenSize = UDim2.new(0, 40, 0, 40)
+    local shownSize = UDim2.new(0, 250, 0, 450)
+    
+    HideButton.MouseButton1Click:Connect(function()
+        isHidden = not isHidden
+        
+        if isHidden then
+            -- Hide
+            ContentFrame.Visible = false
+            TitleBar.Size = UDim2.new(1, 0, 1, 0)
+            TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+            HideButton.Text = "+"
+            HideButton.Position = UDim2.new(0.5, -12, 0.5, -12)
+            HideButton.Size = UDim2.new(0, 24, 0, 24)
+            Title.Visible = false
+            MainFrame.Size = hiddenSize
+        else
+            -- Show
+            ContentFrame.Visible = true
+            TitleBar.Size = UDim2.new(1, 0, 0, 30)
+            TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+            HideButton.Text = "━"
+            HideButton.Position = UDim2.new(1, -30, 0.5, -12)
+            HideButton.Size = UDim2.new(0, 25, 0, 25)
+            Title.Visible = true
+            MainFrame.Size = shownSize
+        end
+    end)
+    
+    -- Button handlers
+    AimbotToggleButton.MouseButton1Click:Connect(function()
+        Aimbot.Enabled = not Aimbot.Enabled
+        AimbotToggleButton.Text = Aimbot.Enabled and "ON" or "OFF"
+        AimbotToggleButton.BackgroundColor3 = Aimbot.Enabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+        UpdateFOVCircle()
+        print("Aimbot " .. (Aimbot.Enabled and "🟢 ENABLED" or "🔴 DISABLED"))
+    end)
+    
+    FOVToggleButton.MouseButton1Click:Connect(function()
+        Aimbot.ShowFOVCircle = not Aimbot.ShowFOVCircle
+        FOVToggleButton.Text = Aimbot.ShowFOVCircle and "ON" or "OFF"
+        FOVToggleButton.BackgroundColor3 = Aimbot.ShowFOVCircle and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+        UpdateFOVCircle()
+        print("FOV Circle " .. (Aimbot.ShowFOVCircle and "🟢 ENABLED" or "🔴 DISABLED"))
+    end)
+    
+    FOVMinusButton.MouseButton1Click:Connect(function()
+        Aimbot.FOV = math.max(Aimbot.FOV - 10, 50)
+        FOVSizeLabel.Text = "FOV Size: " .. Aimbot.FOV
+        UpdateFOVCircle()
+        print("FOV decreased to: " .. Aimbot.FOV)
+    end)
+    
+    FOVPlusButton.MouseButton1Click:Connect(function()
+        Aimbot.FOV = math.min(Aimbot.FOV + 10, 500)
+        FOVSizeLabel.Text = "FOV Size: " .. Aimbot.FOV
+        UpdateFOVCircle()
+        print("FOV increased to: " .. Aimbot.FOV)
+    end)
+    
+    AnimalToggleButton.MouseButton1Click:Connect(function()
+        AnimalESP.Enabled = not AnimalESP.Enabled
+        AnimalToggleButton.Text = AnimalESP.Enabled and "ON" or "OFF"
+        AnimalToggleButton.BackgroundColor3 = AnimalESP.Enabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+        AnimalESP.UpdateAllESP()
+    end)
+    
+    PlayerToggleButton.MouseButton1Click:Connect(function()
+        PlayerESP.Enabled = not PlayerESP.Enabled
+        PlayerToggleButton.Text = PlayerESP.Enabled and "ON" or "OFF"
+        PlayerToggleButton.BackgroundColor3 = PlayerESP.Enabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+        UpdatePlayerESP()
+    end)
+    
+    -- Handlers for animal toggles
+    local function SetupAnimalToggle(toggleButton, animalName)
+        toggleButton.MouseButton1Click:Connect(function()
+            AnimalESP.Animals[animalName] = not AnimalESP.Animals[animalName]
+            toggleButton.Text = AnimalESP.Animals[animalName] and "ON" or "OFF"
+            toggleButton.BackgroundColor3 = AnimalESP.Animals[animalName] and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(150, 0, 0)
+            AnimalESP.UpdateAllESP()
+        end)
+    end
+    
+    SetupAnimalToggle(BearToggle, "Bear")
+    SetupAnimalToggle(BisonToggle, "Bison")
+    SetupAnimalToggle(DeerToggle, "Deer")
+    
+    -- Hotkey for menu (Insert)
+    UserInputService.InputBegan:Connect(function(input, processed)
+        if input.KeyCode == Enum.KeyCode.Insert then
+            isHidden = not isHidden
+            
+            if isHidden then
+                ContentFrame.Visible = false
+                TitleBar.Size = UDim2.new(1, 0, 1, 0)
+                TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+                HideButton.Text = "+"
+                HideButton.Position = UDim2.new(0.5, -12, 0.5, -12)
+                HideButton.Size = UDim2.new(0, 24, 0, 24)
+                Title.Visible = false
+                MainFrame.Size = hiddenSize
+            else
+                ContentFrame.Visible = true
+                TitleBar.Size = UDim2.new(1, 0, 0, 30)
+                TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+                HideButton.Text = "━"
+                HideButton.Position = UDim2.new(1, -30, 0.5, -12)
+                HideButton.Size = UDim2.new(0, 25, 0, 25)
+                Title.Visible = true
+                MainFrame.Size = shownSize
+            end
+        end
+    end)
+    
+    return ScreenGui
+end
+
+-- Animal ESP functions
+function AnimalESP:CreateESP(animal)
+    local animalName = animal.Name
+    local animalType = animalName
+    
+    if not (self.Animals.Bear and animalType == "Bear" or
+            self.Animals.Bison and animalType == "Bison" or
+            self.Animals.Deer and animalType == "Deer" or
+            self.Animals.Gator and animalType == "Gator") then
+        return
+    end
+    
+    local animalPrimary = animal.PrimaryPart or animal:FindFirstChild("HumanoidRootPart") or animal:FindFirstChildWhichIsA("BasePart")
+    if not animalPrimary then
+        for _, part in pairs(animal:GetChildren()) do
+            if part:IsA("BasePart") then
+                animalPrimary = part
+                break
+            end
+        end
+        if not animalPrimary then return end
+    end
+    
+    -- Create box
+    local box = Instance.new("BoxHandleAdornment")
+    box.Name = animalName .. "_ESP"
+    box.Adornee = animalPrimary
+    box.AlwaysOnTop = true
+    box.ZIndex = 10
+    box.Size = animal:GetExtentsSize() * 1.1
+    box.Color3 = AnimalColors[animalType] or Color3.fromRGB(255, 255, 255)
+    box.Transparency = 0.3
+    box.Visible = self.Enabled
+    box.Parent = camera
+    
+    -- Create label
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = animalName .. "_Label"
+    billboard.Adornee = animalPrimary
+    billboard.AlwaysOnTop = true
+    billboard.Size = UDim2.new(0, 100, 0, 40)
+    billboard.StudsOffset = Vector3.new(0, animal:GetExtentsSize().Y/2 + 1, 0)
+    billboard.Parent = camera
+    
+    local label = Instance.new("TextLabel")
+    label.Name = "Label"
+    label.Size = UDim2.new(1, 0, 0, 20)
+    label.Position = UDim2.new(0, 0, 0, 0)
+    label.Text = animalType
+    label.TextColor3 = AnimalColors[animalType] or Color3.fromRGB(255, 255, 255)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.SourceSansBold
+    label.TextSize = 14
+    label.Visible = self.Enabled
+    label.Parent = billboard
+    
+    -- Create red cube in head
+    local headCube = nil
+    local headPart = FindAnimalHead(animal)
+    if headPart then
+        headCube = CreateHeadCube(headPart)
+        if headCube then
+            headCube.Transparency = self.Enabled and 0.2 or 1
+        end
+    end
+    
+    -- Save references
+    self.Boxes[animal] = box
+    self.Labels[animal] = {billboard = billboard, label = label, primary = animalPrimary}
+    if headCube then
+        self.HeadCubes[animal] = headCube
+    end
+    
+    -- Update distance
+    local connection
+    connection = RunService.RenderStepped:Connect(function()
+        if not animal or not animal.Parent or not animalPrimary.Parent then
+            self:RemoveESP(animal)
+            if connection then connection:Disconnect() end
+            return
+        end
+        
+        local playerPrimary = GetPlayerPrimaryPart(GetPlayerModel(LocalPlayer.Name))
+        if playerPrimary then
+            local distance = math.floor((animalPrimary.Position - playerPrimary.Position).Magnitude)
+            label.Text = animalType .. " [" .. distance .. "m]"
+        else
+            label.Text = animalType
+        end
+        
+        local isVisible = self.Enabled and self.Animals[animalType]
+        box.Visible = isVisible
+        label.Visible = isVisible
+        billboard.Enabled = isVisible
+        
+        if headCube then
+            headCube.Transparency = isVisible and 0.2 or 1
+        end
+    end)
+    
+    table.insert(self.Connections, connection)
+end
+
+function AnimalESP:RemoveESP(animal)
+    if self.Boxes[animal] then
+        self.Boxes[animal]:Destroy()
+        self.Boxes[animal] = nil
+    end
+    
+    if self.Labels[animal] then
+        self.Labels[animal].billboard:Destroy()
+        self.Labels[animal] = nil
+    end
+    
+    if self.HeadCubes[animal] then
+        self.HeadCubes[animal]:Destroy()
+        self.HeadCubes[animal] = nil
+    end
+end
+
+function AnimalESP:UpdateAllESP()
+    for animal, box in pairs(self.Boxes) do
+        if animal and animal.Parent then
+            local animalType = animal.Name
+            if box and AnimalColors[animalType] then
+                local isVisible = self.Enabled and self.Animals[animalType]
+                
+                box.Color3 = AnimalColors[animalType]
+                box.Visible = isVisible
+                
+                if self.Labels[animal] then
+                    self.Labels[animal].label.TextColor3 = AnimalColors[animalType]
+                    self.Labels[animal].label.Visible = isVisible
+                    self.Labels[animal].billboard.Enabled = isVisible
+                end
+                
+                if self.HeadCubes[animal] then
+                    self.HeadCubes[animal].Transparency = isVisible and 0.2 or 1
+                end
+            end
+        else
+            self:RemoveESP(animal)
+        end
+    end
+end
+
+function AnimalESP:Cleanup()
+    for animal, _ in pairs(self.Boxes) do
+        self:RemoveESP(animal)
+    end
+    
+    for _, connection in ipairs(self.Connections) do
+        if connection then
+            connection:Disconnect()
+        end
+    end
+    
+    self.Boxes = {}
+    self.Labels = {}
+    self.HeadCubes = {}
+    self.Connections = {}
+end
+
+-- Player ESP functions
+local function CreateSquareGUI()
+    if SquareGUI then SquareGUI:Destroy() end
+    
+    SquareGUI = Instance.new("ScreenGui")
+    SquareGUI.Name = "PlayerSquares"
+    SquareGUI.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    SquareGUI.ResetOnSpawn = false
+    SquareGUI.IgnoreGuiInset = true
+    
+    return SquareGUI
+end
+
+local function CreateSquareForPlayer(targetPlayer)
+    if targetPlayer == LocalPlayer then return nil end
+    if PlayerStorage[targetPlayer] then return PlayerStorage[targetPlayer] end
+    
+    local squareData = {
+        Player = targetPlayer,
+        SquareFrame = nil,
+        TopLine = nil,
+        BottomLine = nil,
+        LeftLine = nil,
+        RightLine = nil,
+        NameLabel = nil,
+        DistanceLabel = nil
+    }
+    
+    local SquareFrame = Instance.new("Frame")
+    SquareFrame.Name = targetPlayer.Name .. "_SquareFrame"
+    SquareFrame.BackgroundTransparency = 1
+    SquareFrame.Size = UDim2.new(0, PlayerESP.SquareSize, 0, PlayerESP.SquareSize)
+    SquareFrame.Visible = PlayerESP.Enabled
+    SquareFrame.ZIndex = 10
+    SquareFrame.Parent = SquareGUI
+    
+    local TopLine = Instance.new("Frame")
+    TopLine.Name = "TopLine"
+    TopLine.BackgroundColor3 = PlayerESP.SquareColorEnemy
+    TopLine.BorderSizePixel = 0
+    TopLine.Size = UDim2.new(1, 0, 0, PlayerESP.SquareThickness)
+    TopLine.Position = UDim2.new(0, 0, 0, 0)
+    TopLine.ZIndex = 11
+    TopLine.Parent = SquareFrame
+    
+    local BottomLine = Instance.new("Frame")
+    BottomLine.Name = "BottomLine"
+    BottomLine.BackgroundColor3 = PlayerESP.SquareColorEnemy
+    BottomLine.BorderSizePixel = 0
+    BottomLine.Size = UDim2.new(1, 0, 0, PlayerESP.SquareThickness)
+    BottomLine.Position = UDim2.new(0, 0, 1, -PlayerESP.SquareThickness)
+    BottomLine.ZIndex = 11
+    BottomLine.Parent = SquareFrame
+    
+    local LeftLine = Instance.new("Frame")
+    LeftLine.Name = "LeftLine"
+    LeftLine.BackgroundColor3 = PlayerESP.SquareColorEnemy
+    LeftLine.BorderSizePixel = 0
+    LeftLine.Size = UDim2.new(0, PlayerESP.SquareThickness, 1, 0)
+    LeftLine.Position = UDim2.new(0, 0, 0, 0)
+    LeftLine.ZIndex = 11
+    LeftLine.Parent = SquareFrame
+    
+    local RightLine = Instance.new("Frame")
+    RightLine.Name = "RightLine"
+    RightLine.BackgroundColor3 = PlayerESP.SquareColorEnemy
+    RightLine.BorderSizePixel = 0
+    RightLine.Size = UDim2.new(0, PlayerESP.SquareThickness, 1, 0)
+    RightLine.Position = UDim2.new(1, -PlayerESP.SquareThickness, 0, 0)
+    RightLine.ZIndex = 11
+    RightLine.Parent = SquareFrame
+    
+    local NameLabel = Instance.new("TextLabel")
+    NameLabel.Name = targetPlayer.Name .. "_Name"
+    NameLabel.Text = string.sub(targetPlayer.Name, 1, 10) .. (string.len(targetPlayer.Name) > 10 and "..." or "")
+    NameLabel.BackgroundColor3 = PlayerESP.TextBackground
+    NameLabel.BackgroundTransparency = PlayerESP.TextBackgroundTransparency
+    NameLabel.TextColor3 = PlayerESP.SquareColorEnemy
+    NameLabel.TextSize = PlayerESP.TextSize
+    NameLabel.Font = Enum.Font.SourceSansBold
+    NameLabel.Size = UDim2.new(0, 0, 0, 0)
+    NameLabel.Visible = PlayerESP.Enabled and PlayerESP.ShowName
+    NameLabel.ZIndex = 12
+    NameLabel.Parent = SquareGUI
+    
+    local DistanceLabel = Instance.new("TextLabel")
+    DistanceLabel.Name = targetPlayer.Name .. "_Distance"
+    DistanceLabel.Text = "0m"
+    DistanceLabel.BackgroundColor3 = PlayerESP.TextBackground
+    DistanceLabel.BackgroundTransparency = PlayerESP.TextBackgroundTransparency
+    DistanceLabel.TextColor3 = PlayerESP.SquareColorEnemy
+    DistanceLabel.TextSize = PlayerESP.TextSize - 1
+    DistanceLabel.Font = Enum.Font.SourceSans
+    DistanceLabel.Size = UDim2.new(0, 0, 0, 0)
+    DistanceLabel.Visible = PlayerESP.Enabled and PlayerESP.ShowDistance
+    DistanceLabel.ZIndex = 12
+    DistanceLabel.Parent = SquareGUI
+    
+    squareData.SquareFrame = SquareFrame
+    squareData.TopLine = TopLine
+    squareData.BottomLine = BottomLine
+    squareData.LeftLine = LeftLine
+    squareData.RightLine = RightLine
+    squareData.NameLabel = NameLabel
+    squareData.DistanceLabel = DistanceLabel
+    
+    PlayerStorage[targetPlayer] = squareData
+    return squareData
+end
+
+local function GetSquareColor(targetPlayer)
+    if not PlayerESP.TeamCheck then
+        return PlayerESP.SquareColorNeutral
+    end
+    
+    if targetPlayer.Team and LocalPlayer.Team then
+        if targetPlayer.Team == LocalPlayer.Team then
+            return PlayerESP.SquareColorAlly
+        else
+            return PlayerESP.SquareColorEnemy
+        end
+    end
+    
+    return PlayerESP.SquareColorNeutral
+end
+
+local function UpdatePlayerESP()
+    for targetPlayer, squareData in pairs(PlayerStorage) do
+        if squareData then
+            local squareColor = GetSquareColor(targetPlayer)
+            
+            squareData.SquareFrame.Visible = PlayerESP.Enabled
+            squareData.TopLine.BackgroundColor3 = squareColor
+            squareData.BottomLine.BackgroundColor3 = squareColor
+            squareData.LeftLine.BackgroundColor3 = squareColor
+            squareData.RightLine.BackgroundColor3 = squareColor
+            
+            squareData.NameLabel.Visible = PlayerESP.Enabled and PlayerESP.ShowName
+            squareData.NameLabel.TextColor3 = squareColor
+            
+            squareData.DistanceLabel.Visible = PlayerESP.Enabled and PlayerESP.ShowDistance
+            squareData.DistanceLabel.TextColor3 = squareColor
+        end
+    end
+end
+
+local function GetAllPlayersFromPath()
+    local playersList = {}
+    
+    local entities = workspace:FindFirstChild("WORKSPACE_Entities")
+    if not entities then return playersList end
+    
+    local playersFolder = entities:FindFirstChild("Players")
+    if not playersFolder then return playersList end
+    
+    for _, model in pairs(playersFolder:GetChildren()) do
+        if model:IsA("Model") then
+            local playerObj = Players:FindFirstChild(model.Name)
+            if playerObj then
+                table.insert(playersList, playerObj)
+            else
+                local virtualPlayer = {
+                    Name = model.Name,
+                    Character = model,
+                    Team = nil
+                }
+                table.insert(playersList, virtualPlayer)
+            end
+        end
+    end
+    
+    return playersList
+end
+
+local function InitializePlayerESP()
+    CreateSquareGUI()
+    
+    for targetPlayer, squareData in pairs(PlayerStorage) do
+        if squareData then
+            squareData.SquareFrame:Destroy()
+            squareData.NameLabel:Destroy()
+            squareData.DistanceLabel:Destroy()
+        end
+    end
+    PlayerStorage = {}
+    
+    local playersFromPath = GetAllPlayersFromPath()
+    
+    for _, targetPlayer in ipairs(playersFromPath) do
+        if targetPlayer.Name ~= LocalPlayer.Name then
+            CreateSquareForPlayer(targetPlayer)
+        end
+    end
+    
+    UpdatePlayerESP()
+end
+
+local function UpdatePlayerSquares()
+    if not PlayerESP.Enabled then 
+        for _, squareData in pairs(PlayerStorage) do
+            if squareData then
+                squareData.SquareFrame.Visible = false
+                squareData.NameLabel.Visible = false
+                squareData.DistanceLabel.Visible = false
+            end
+        end
+        return 
+    end
+    
+    for targetPlayer, squareData in pairs(PlayerStorage) do
+        if targetPlayer and squareData then
+            local playerModel = GetPlayerModel(targetPlayer.Name)
+            
+            if playerModel then
+                local rootPart = playerModel:FindFirstChild("HumanoidRootPart") or 
+                               playerModel:FindFirstChild("Torso") or
+                               playerModel:FindFirstChild("UpperTorso") or
+                               playerModel.PrimaryPart
+                
+                if rootPart then
+                    local screenPos, onScreen = camera:WorldToViewportPoint(rootPart.Position)
+                    
+                    if onScreen then
+                        local squareColor = GetSquareColor(targetPlayer)
+                        local squareX = screenPos.X - PlayerESP.SquareSize / 2
+                        local squareY = screenPos.Y - PlayerESP.SquareSize / 2
+                        
+                        squareData.SquareFrame.Position = UDim2.new(0, squareX, 0, squareY)
+                        squareData.SquareFrame.Visible = true
+                        
+                        squareData.TopLine.BackgroundColor3 = squareColor
+                        squareData.BottomLine.BackgroundColor3 = squareColor
+                        squareData.LeftLine.BackgroundColor3 = squareColor
+                        squareData.RightLine.BackgroundColor3 = squareColor
+                        
+                        if PlayerESP.ShowName then
+                            squareData.NameLabel.Text = string.sub(targetPlayer.Name, 1, 10) .. (string.len(targetPlayer.Name) > 10 and "..." or "")
+                            squareData.NameLabel.TextColor3 = squareColor
+                            
+                            local nameWidth = string.len(squareData.NameLabel.Text) * (PlayerESP.TextSize * 0.6)
+                            squareData.NameLabel.Size = UDim2.new(0, nameWidth + 8, 0, PlayerESP.TextSize + 4)
+                            squareData.NameLabel.Position = UDim2.new(
+                                0,
+                                screenPos.X - (nameWidth + 8) / 2,
+                                0,
+                                squareY - (PlayerESP.TextSize + 4) - 5
+                            )
+                            squareData.NameLabel.Visible = true
+                        end
+                        
+                        if PlayerESP.ShowDistance then
+                            local distance = 0
+                            local localModel = GetPlayerModel(LocalPlayer.Name)
+                            if localModel then
+                                local localRoot = localModel:FindFirstChild("HumanoidRootPart") or 
+                                                localModel:FindFirstChild("Torso")
+                                if localRoot then
+                                    distance = (rootPart.Position - localRoot.Position).Magnitude
+                                end
+                            end
+                            
+                            local distanceText
+                            if distance >= 1000 then
+                                distanceText = string.format("%.1fk", distance / 1000)
+                            else
+                                distanceText = string.format("%d", math.floor(distance))
+                            end
+                            
+                            squareData.DistanceLabel.Text = distanceText .. "m"
+                            squareData.DistanceLabel.TextColor3 = squareColor
+                            
+                            local distWidth = string.len(distanceText) * ((PlayerESP.TextSize - 1) * 0.55)
+                            squareData.DistanceLabel.Size = UDim2.new(0, distWidth + 8, 0, PlayerESP.TextSize + 2)
+                            squareData.DistanceLabel.Position = UDim2.new(
+                                0,
+                                screenPos.X - (distWidth + 8) / 2,
+                                0,
+                                squareY + PlayerESP.SquareSize + 5
+                            )
+                            squareData.DistanceLabel.Visible = true
+                        end
+                    else
+                        squareData.SquareFrame.Visible = false
+                        squareData.NameLabel.Visible = false
+                        squareData.DistanceLabel.Visible = false
+                    end
+                else
+                    squareData.SquareFrame.Visible = false
+                    squareData.NameLabel.Visible = false
+                    squareData.DistanceLabel.Visible = false
+                end
+            else
+                squareData.SquareFrame.Visible = false
+                squareData.NameLabel.Visible = false
+                squareData.DistanceLabel.Visible = false
+            end
+        end
+    end
+end
+
+-- Height calculation function for aimbot
+local function CalculateLinearHeight(distance)
+    return Aimbot.BaseHeight + (distance * Aimbot.HeightPerStud)
+end
+
+-- Main Aimbot loop
+RunService.RenderStepped:Connect(function()
+    -- Update FOV circle
+    UpdateFOVCircle()
+    
+    -- Update player squares
+    UpdatePlayerSquares()
+    
+    -- Check aimbot conditions
+    if not Aimbot.Enabled or not Aimbot.Aiming then return end
+    
+    local camera = Workspace.CurrentCamera
+    local cameraPos = camera.CFrame.Position
+    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+    
+    local closestTarget = nil
+    local closestDistance = math.huge
+    
+    -- Find closest target
+    for _, player in pairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if Aimbot.TeamCheck and player.Team == LocalPlayer.Team then continue end
+        
+        local playerModel = PLAYERS_FOLDER:FindFirstChild(player.Name)
+        if not playerModel then continue end
+        
+        local character = player.Character or playerModel
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        if not rootPart then continue end
+        
+        -- Distance to target
+        local distance = (rootPart.Position - cameraPos).Magnitude
+        
+        -- Calculate height using formula
+        local height = CalculateLinearHeight(distance)
+        
+        -- Aim position
+        local aimPos = rootPart.Position + Vector3.new(0, height, 0)
+        
+        -- Convert to screen coordinates
+        local screenPoint, onScreen = camera:WorldToViewportPoint(aimPos)
+        if not onScreen then continue end
+        
+        -- Check FOV
+        local screenPos = Vector2.new(screenPoint.X, screenPoint.Y)
+        local centerPos = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+        local screenDist = (screenPos - centerPos).Magnitude
+        
+        -- If target is OUTSIDE FOV circle - skip
+        if screenDist > Aimbot.FOV then continue end
+        
+        -- Distance from cursor for selecting closest target
+        local mouseDist = (screenPos - mousePos).Magnitude
+        
+        if mouseDist < closestDistance then
+            closestDistance = mouseDist
+            closestTarget = {
+                ScreenPoint = screenPoint,
+                Distance = distance,
+                Height = height,
+                ScreenDist = screenDist
+            }
+        end
+    end
+    
+    -- Aim
+    if closestTarget then
+        local targetPos = Vector2.new(closestTarget.ScreenPoint.X, closestTarget.ScreenPoint.Y)
+        local currentPos = Vector2.new(Mouse.X, Mouse.Y)
+        local delta = (targetPos - currentPos) * Aimbot.Smoothing
+        
+        -- Move mouse
+        if delta.Magnitude > 0.1 then
+            if mousemoverel then
+                mousemoverel(delta.X, delta.Y)
+            else
+                UserInputService:MouseMove(delta.X, delta.Y)
+            end
+        end
+    end
+end)
+
+-- Input handling for aimbot
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    
+    -- Z key to toggle aimbot
+    if input.KeyCode == Aimbot.ActivateKey then
+        Aimbot.Enabled = not Aimbot.Enabled
+        UpdateFOVCircle()
+        print("Aimbot " .. (Aimbot.Enabled and "🟢 ACTIVATED (Z)" or "🔴 DEACTIVATED (Z)"))
+    
+    -- RMB for aiming (only if aimbot is activated)
+    elseif input.UserInputType == Aimbot.AimKey then
+        if Aimbot.Enabled then
+            Aimbot.Aiming = true
+            UpdateFOVCircle()
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, processed)
+    if processed then return end
+    
+    -- Release RMB - stop aiming
+    if input.UserInputType == Aimbot.AimKey then
+        Aimbot.Aiming = false
+        UpdateFOVCircle()
+    end
+end)
+
+-- Animal initialization
+local function InitializeAnimalESP()
+    AnimalESP:Cleanup()
+    
+    local entities = workspace:FindFirstChild("WORKSPACE_Entities")
+    if not entities then return end
+    
+    local animalsFolder = entities:FindFirstChild("Animals")
+    if not animalsFolder then return end
+    
+    for _, animal in pairs(animalsFolder:GetChildren()) do
+        if animal:IsA("Model") then
+            local animalName = animal.Name
+            if animalName == "Bear" or animalName == "Bison" or animalName == "Deer" or animalName == "Gator" then
+                task.wait(0.05)
+                AnimalESP:CreateESP(animal)
+            end
+        end
+    end
+    
+    local childAddedConnection
+    childAddedConnection = animalsFolder.ChildAdded:Connect(function(animal)
+        if animal:IsA("Model") then
+            local animalName = animal.Name
+            if animalName == "Bear" or animalName == "Bison" or animalName == "Deer" or animalName == "Gator" then
+                task.wait(0.5)
+                AnimalESP:CreateESP(animal)
+            end
+        end
+    end)
+    
+    local childRemovedConnection
+    childRemovedConnection = animalsFolder.ChildRemoved:Connect(function(animal)
+        AnimalESP:RemoveESP(animal)
+    end)
+    
+    table.insert(AnimalESP.Connections, childAddedConnection)
+    table.insert(AnimalESP.Connections, childRemovedConnection)
+end
+
+-- Main initialization
+local function InitializeAllESP()
+    CreateMovableMenu()
+    InitializeAnimalESP()
+    InitializePlayerESP()
+end
+
+-- Player handlers
+Players.PlayerAdded:Connect(function(newPlayer)
+    task.wait(2)
+    if newPlayer ~= LocalPlayer then
+        InitializePlayerESP()
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(removingPlayer)
+    if PlayerStorage[removingPlayer] then
+        PlayerStorage[removingPlayer].SquareFrame:Destroy()
+        PlayerStorage[removingPlayer].NameLabel:Destroy()
+        PlayerStorage[removingPlayer].DistanceLabel:Destroy()
+        PlayerStorage[removingPlayer] = nil
+    end
+end)
+
+-- mousemoverrel
+if not mousemoverrel then
+    getgenv().mousemoverrel = function(x, y)
+        local vim = game:GetService("VirtualInputManager")
+        vim:SendMouseMoveEvent(x, y, game)
+    end
+end
+
+-- Start
+task.wait(2)
+CreateFOVCircle()
+InitializeAllESP()
+
+print("=======================================")
+print("🎯 AIMBOT & ESP SUCCESSFULLY STARTED")
+print("=======================================")
+print("🎮 CONTROLS:")
+print("Z - Toggle Aimbot (press Z to enable/disable aimbot)")
+print("RMB - Aiming (only when aimbot is active)")
+print("Insert - Show/hide menu")
+print("=======================================")
+print("📊 FEATURES:")
+print("• Aimbot with FOV circle (changes color)")
+print("• ESP for animals (4 types)")
+print("• ESP for players (squares + distance)")
+print("• Draggable menu")
+print("=======================================")
+print("✅ READY! Press Z to enable Aimbot")
+print("   Press Insert to open settings menu")
+print("   Tip: Press Z key to turn aimbot on/off")
