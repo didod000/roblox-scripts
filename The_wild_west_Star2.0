@@ -68,9 +68,22 @@ local PlayerESP = {
     TextBackgroundTransparency = 0.5
 }
 
+-- Glow Settings (НЕЗАВИСИМО, работает с моделями из WORKSPACE_Entities.Players)
+local GlowSettings = {
+    Enabled = false,
+    TeamCheck = true,
+    EnemyColor = Color3.fromRGB(255, 0, 0),   -- Красный для врагов
+    AllyColor = Color3.fromRGB(255, 255, 255), -- Белый для союзников
+    FillTransparency = 0.5,
+    OutlineTransparency = 0.5
+}
+
 -- Storage
 local PlayerStorage = {}
 local SquareGUI
+
+-- Хранилище Highlight'ов: ключ – модель (Model), значение – Highlight
+local PlayerGlowHighlights = {}
 
 -- Colors for different animals
 local AnimalColors = {
@@ -87,7 +100,7 @@ local FOVCircle = nil
 local ScreenGui = nil
 local MenuVisible = true
 
--- Function to get player model
+-- Function to get player model (используется ESP и теперь Glow)
 local function GetPlayerModel(playerName)
     local entities = workspace:FindFirstChild("WORKSPACE_Entities")
     if not entities then return nil end
@@ -187,11 +200,10 @@ local function UpdateFOVCircle()
     end
 end
 
--- Получение позиции для прицеливания (ИСПРАВЛЕНО: используется HeightPerStud вместо 0.015)
+-- Получение позиции для прицеливания
 local function GetAimPosition(character, targetPart, distance)
     if not character then return nil end
     
-    -- Правильная компенсация перспективы (как у торса)
     local extraHeight = distance * Aimbot.HeightPerStud
     
     if targetPart == "Head" then
@@ -232,7 +244,7 @@ local function GetAimPosition(character, targetPart, distance)
     return nil
 end
 
--- Формула высоты для торса (зависит от расстояния)
+-- Формула высоты для торса
 local function CalculateLinearHeight(distance)
     return Aimbot.BaseHeight + (distance * Aimbot.HeightPerStud)
 end
@@ -249,8 +261,8 @@ local function CreateMovableMenu()
     -- Main frame (movable)
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 250, 0, 520)
-    MainFrame.Position = UDim2.new(0.5, -125, 0.5, -260)
+    MainFrame.Size = UDim2.new(0, 250, 0, 550)
+    MainFrame.Position = UDim2.new(0.5, -125, 0.5, -275)
     MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
     MainFrame.BackgroundTransparency = 0.1
     MainFrame.BorderSizePixel = 1
@@ -660,10 +672,10 @@ local function CreateMovableMenu()
     local BisonToggle = CreateAnimalToggle("Bison", 82, true)
     local DeerToggle = CreateAnimalToggle("Deer", 104, true)
     
-    -- Player section
+    -- Player section (увеличена для Glow)
     local PlayerSection = Instance.new("Frame")
     PlayerSection.Name = "PlayerSection"
-    PlayerSection.Size = UDim2.new(1, 0, 0, 90)
+    PlayerSection.Size = UDim2.new(1, 0, 0, 120)
     PlayerSection.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
     PlayerSection.BackgroundTransparency = 0.2
     PlayerSection.BorderSizePixel = 1
@@ -681,6 +693,7 @@ local function CreateMovableMenu()
     PlayerTitle.TextSize = 12
     PlayerTitle.Parent = PlayerSection
     
+    -- Player ESP Toggle
     local PlayerToggleFrame = Instance.new("Frame")
     PlayerToggleFrame.Name = "PlayerToggleFrame"
     PlayerToggleFrame.Size = UDim2.new(1, -10, 0, 25)
@@ -712,11 +725,44 @@ local function CreateMovableMenu()
     PlayerToggleButton.Font = Enum.Font.SourceSans
     PlayerToggleButton.TextSize = 11
     PlayerToggleButton.Parent = PlayerToggleFrame
+
+    -- Glow Toggle (независимый)
+    local GlowToggleFrame = Instance.new("Frame")
+    GlowToggleFrame.Name = "GlowToggleFrame"
+    GlowToggleFrame.Size = UDim2.new(1, -10, 0, 25)
+    GlowToggleFrame.Position = UDim2.new(0, 5, 0, 60)
+    GlowToggleFrame.BackgroundTransparency = 1
+    GlowToggleFrame.Parent = PlayerSection
+    
+    local GlowToggleLabel = Instance.new("TextLabel")
+    GlowToggleLabel.Name = "GlowToggleLabel"
+    GlowToggleLabel.Size = UDim2.new(0, 120, 1, 0)
+    GlowToggleLabel.Position = UDim2.new(0, 0, 0, 0)
+    GlowToggleLabel.Text = "Player Glow"
+    GlowToggleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    GlowToggleLabel.BackgroundTransparency = 1
+    GlowToggleLabel.Font = Enum.Font.SourceSans
+    GlowToggleLabel.TextSize = 12
+    GlowToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    GlowToggleLabel.Parent = GlowToggleFrame
+    
+    local GlowToggleButton = Instance.new("TextButton")
+    GlowToggleButton.Name = "GlowToggleButton"
+    GlowToggleButton.Size = UDim2.new(0, 50, 0, 20)
+    GlowToggleButton.Position = UDim2.new(1, -50, 0.5, -10)
+    GlowToggleButton.Text = GlowSettings.Enabled and "ON" or "OFF"
+    GlowToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    GlowToggleButton.BackgroundColor3 = GlowSettings.Enabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+    GlowToggleButton.BorderSizePixel = 1
+    GlowToggleButton.BorderColor3 = Color3.fromRGB(80, 80, 80)
+    GlowToggleButton.Font = Enum.Font.SourceSans
+    GlowToggleButton.TextSize = 11
+    GlowToggleButton.Parent = GlowToggleFrame
     
     -- Hide/show menu
     local isHidden = false
     local hiddenSize = UDim2.new(0, 40, 0, 40)
-    local shownSize = UDim2.new(0, 250, 0, 520)
+    local shownSize = UDim2.new(0, 250, 0, 550)
 
     HideButton.MouseButton1Click:Connect(function()
         isHidden = not isHidden
@@ -779,6 +825,14 @@ local function CreateMovableMenu()
         PlayerToggleButton.BackgroundColor3 = PlayerESP.Enabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
         UpdatePlayerESP()
     end)
+
+    -- Glow toggle handler
+    GlowToggleButton.MouseButton1Click:Connect(function()
+        GlowSettings.Enabled = not GlowSettings.Enabled
+        GlowToggleButton.Text = GlowSettings.Enabled and "ON" or "OFF"
+        GlowToggleButton.BackgroundColor3 = GlowSettings.Enabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+        UpdateAllGlow()
+    end)
     
     local function SetupAnimalToggle(toggleButton, animalName)
         toggleButton.MouseButton1Click:Connect(function()
@@ -820,7 +874,129 @@ local function CreateMovableMenu()
     return ScreenGui
 end
 
--- Animal ESP functions
+-- ===================== Glow Functions (привязаны к WORKSPACE_Entities.Players) =====================
+
+-- Определить цвет для модели игрока
+local function GetGlowColorForModel(playerModel)
+    if not GlowSettings.TeamCheck then
+        return GlowSettings.EnemyColor
+    end
+
+    -- Пытаемся найти объект Player по имени модели
+    local playerObj = Players:FindFirstChild(playerModel.Name)
+    if playerObj and playerObj.Team and LocalPlayer.Team then
+        if playerObj.Team == LocalPlayer.Team then
+            return GlowSettings.AllyColor
+        else
+            return GlowSettings.EnemyColor
+        end
+    end
+
+    -- Если игрок не найден или нет команды – считаем врагом
+    return GlowSettings.EnemyColor
+end
+
+-- Создать Highlight на модели
+local function CreateGlowOnModel(playerModel)
+    if PlayerGlowHighlights[playerModel] then
+        PlayerGlowHighlights[playerModel]:Destroy()
+    end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "PlayerGlow"
+    highlight.FillTransparency = GlowSettings.FillTransparency
+    highlight.OutlineTransparency = GlowSettings.OutlineTransparency
+    highlight.FillColor = GetGlowColorForModel(playerModel)
+    highlight.OutlineColor = highlight.FillColor
+    highlight.Adornee = playerModel
+    highlight.Parent = playerModel
+    highlight.Enabled = GlowSettings.Enabled
+
+    PlayerGlowHighlights[playerModel] = highlight
+end
+
+-- Удалить Highlight с модели
+local function RemoveGlowFromModel(playerModel)
+    if PlayerGlowHighlights[playerModel] then
+        PlayerGlowHighlights[playerModel]:Destroy()
+        PlayerGlowHighlights[playerModel] = nil
+    end
+end
+
+-- Обновить все существующие Highlight (при включении/выключении)
+function UpdateAllGlow()
+    -- Обновляем видимость и цвет для всех существующих Highlight
+    for model, highlight in pairs(PlayerGlowHighlights) do
+        if highlight and highlight.Parent then
+            highlight.Enabled = GlowSettings.Enabled
+            if GlowSettings.Enabled then
+                local color = GetGlowColorForModel(model)
+                highlight.FillColor = color
+                highlight.OutlineColor = color
+            end
+        else
+            RemoveGlowFromModel(model)
+        end
+    end
+
+    -- Если Glow включён, проходим по всем моделям в папке и создаём Highlight для тех, у кого его нет
+    if GlowSettings.Enabled then
+        local playersFolder = Workspace:FindFirstChild("WORKSPACE_Entities"):FindFirstChild("Players")
+        if playersFolder then
+            for _, model in ipairs(playersFolder:GetChildren()) do
+                if model:IsA("Model") and model.Name ~= LocalPlayer.Name then
+                    if not PlayerGlowHighlights[model] then
+                        CreateGlowOnModel(model)
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Очистить все Highlight
+local function CleanupAllGlow()
+    for model, highlight in pairs(PlayerGlowHighlights) do
+        highlight:Destroy()
+    end
+    table.clear(PlayerGlowHighlights)
+end
+
+-- Инициализация Glow: создаём Highlight для всех текущих моделей и настраиваем слушатели
+local function InitializeAllGlow()
+    CleanupAllGlow()
+    
+    local playersFolder = Workspace:FindFirstChild("WORKSPACE_Entities"):FindFirstChild("Players")
+    if not playersFolder then
+        task.wait(1)
+        InitializeAllGlow()
+        return
+    end
+
+    -- Существующие модели
+    for _, model in ipairs(playersFolder:GetChildren()) do
+        if model:IsA("Model") and model.Name ~= LocalPlayer.Name then
+            CreateGlowOnModel(model)
+        end
+    end
+
+    -- Отслеживаем новые модели
+    playersFolder.ChildAdded:Connect(function(model)
+        if model:IsA("Model") and model.Name ~= LocalPlayer.Name then
+            task.wait(0.3) -- небольшая задержка, чтобы модель прогрузилась
+            CreateGlowOnModel(model)
+        end
+    end)
+
+    -- Удаляем Highlight при исчезновении модели
+    playersFolder.ChildRemoved:Connect(function(model)
+        if model:IsA("Model") then
+            RemoveGlowFromModel(model)
+        end
+    end)
+end
+
+-- ===================== Animal ESP functions =====================
 function AnimalESP:CreateESP(animal)
     local animalName = animal.Name
     local animalType = animalName
@@ -1348,12 +1524,15 @@ local function InitializeAllESP()
     CreateMovableMenu()
     InitializeAnimalESP()
     InitializePlayerESP()
+    InitializeAllGlow()
 end
 
--- Player handlers
+-- Player handlers (для Player ESP)
 Players.PlayerAdded:Connect(function(newPlayer)
     task.wait(2)
-    if newPlayer ~= LocalPlayer then InitializePlayerESP() end
+    if newPlayer ~= LocalPlayer then 
+        InitializePlayerESP()
+    end
 end)
 Players.PlayerRemoving:Connect(function(removingPlayer)
     if PlayerStorage[removingPlayer] then
@@ -1376,4 +1555,4 @@ end
 task.wait(2)
 CreateFOVCircle()
 InitializeAllESP()
-print("Aimbot + ESP loaded. Distance correction unified for all target parts.")
+print("Aimbot + ESP + Glow loaded. Glow now uses custom models from WORKSPACE_Entities.Players.")
